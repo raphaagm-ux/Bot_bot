@@ -3,8 +3,11 @@ import logging
 import os
 import re
 import signal
+import hashlib
+import hmac
 from collections.abc import Iterable
 
+from aiohttp import web
 from telegram import ReplyKeyboardMarkup, Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
@@ -145,7 +148,18 @@ async def run() -> None:
     if len(set(bot_tokens.values())) != len(bot_tokens):
         raise RuntimeError("Each Telegram bot must use a different token")
 
-    applications = [(name, build_application(token)) for name, token in bot_tokens.items()]
+    external_url = setting("RENDER_EXTERNAL_URL") or setting("WEBHOOK_BASE_URL")
+    if not external_url.startswith("https://"):
+        raise RuntimeError("RENDER_EXTERNAL_URL or WEBHOOK_BASE_URL must be a public HTTPS URL")
+
+    applications = {
+        name: {
+            "application": build_application(token),
+            "secret": hashlib.sha256(f"nue-webhook:{token}".encode()).hexdigest(),
+            "path": name.lower(),
+        }
+        for name, token in bot_tokens.items()
+    }
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -154,19 +168,53 @@ async def run() -> None:
         except NotImplementedError:
             pass
 
+    async def receive_update(request: web.Request) -> web.Response:
+        name = request.match_info["bot_name"]
+        config = applications.get(name)
+        if config is None:
+            raise web.HTTPNotFound()
+        supplied_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+        if not hmac.compare_digest(supplied_secret, config["secret"]):
+            raise web.HTTPForbidden()
+        try:
+            payload = await request.json()
+            update = Update.de_json(payload, config["application"].bot)
+        except Exception:
+            logger.warning("Rejected malformed Telegram update for %s", name)
+            raise web.HTTPBadRequest()
+        await config["application"].update_queue.put(update)
+        return web.Response(text="ok")
+
+    async def health(request: web.Request) -> web.Response:
+        return web.json_response({"status": "ok", "bots": len(applications)})
+
+    server = web.Application(client_max_size=1024 * 1024)
+    server.router.add_get("/", health)
+    server.router.add_get("/health", health)
+    server.router.add_post("/telegram/{bot_name}", receive_update)
+    runner = web.AppRunner(server)
+
     try:
-        for name, application in applications:
+        for name, config in applications.items():
+            application = config["application"]
             await application.initialize()
             await application.start()
-            if application.updater is None:
-                raise RuntimeError(f"Polling is unavailable for {name}")
-            await application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
-            logger.info("Started %s bot", name)
+            webhook_url = f"{external_url.rstrip('/')}/telegram/{config['path']}"
+            await application.bot.set_webhook(
+                url=webhook_url,
+                allowed_updates=Update.ALL_TYPES,
+                secret_token=config["secret"],
+            )
+            logger.info("Started %s bot webhook", name)
+        await runner.setup()
+        site = web.TCPSite(runner, "0.0.0.0", int(setting("PORT") or "10000"))
+        await site.start()
+        logger.info("Web service is ready")
         await stop_event.wait()
     finally:
-        for name, application in reversed(applications):
-            if application.updater and application.updater.running:
-                await application.updater.stop()
+        await runner.cleanup()
+        for name, config in reversed(list(applications.items())):
+            application = config["application"]
             if application.running:
                 await application.stop()
             await application.shutdown()
