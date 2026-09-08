@@ -5,7 +5,7 @@ One secure Python application that runs both Nuè Wellness Telegram bots:
 - `@Wellnsscouch_bot`
 - `@Nueyounue_bot`
 
-The bots share the same menu and safe automatic replies while using separate Telegram tokens. Tokens are read only from environment variables and must never be committed to GitHub.
+The bots share the same menu and safe automatic replies while using separate Telegram tokens. Tokens are read only from environment variables and must never be committed to GitHub. Telegram webhooks let the app run as a free Render web service.
 
 ## Features
 
@@ -33,11 +33,11 @@ If either bot belongs to another Telegram account, transfer or recreate it under
 
 ## 2. Deploy on Render
 
-Render background workers are suitable because Telegram polling needs a process that stays running. A paid Starter worker may be required based on Render's current plans.
+This project uses a free Render web service. Render may pause a free service after 15 minutes without incoming traffic. A new Telegram message sends an incoming webhook request that wakes it again, so the first reply after a quiet period can be delayed while the service starts.
 
 1. Sign in to [Render](https://render.com/) and connect this GitHub repository.
 2. Choose **New**, then **Blueprint**, and select `raphaagm-ux/Bot_bot`.
-3. Render will read `render.yaml` and create a background worker.
+3. Render will read `render.yaml` and create a free web service. No paid worker or payment card is required for this configuration.
 4. In the worker's **Environment** settings, add these secret values:
    - `WELLNSSCOUCH_BOT_TOKEN`: token for `@Wellnsscouch_bot`
    - `NUEYOUNUE_BOT_TOKEN`: token for `@Nueyounue_bot`
@@ -48,10 +48,10 @@ Render background workers are suitable because Telegram polling needs a process 
    - `SUPPORT_USERNAME` (without `@`)
    - `PROGRAMS_PRICING_TEXT`
    - `FAQ_TEXT`
-6. Deploy the worker and check its logs for both `Started ... bot` messages.
+6. Deploy the web service and check its logs for `Started Wellnsscouch bot webhook`, `Started Nueyounue bot webhook`, and `Web service is ready`.
 7. Open each bot in Telegram and send `/start`.
 
-Do not put secrets into `render.yaml`. Marking token values as `sync: false` makes Render request them securely during setup.
+Do not put secrets into `render.yaml`. Marking token values as `sync: false` makes Render request them securely during setup. Render automatically supplies the public `RENDER_EXTERNAL_URL` used to register both Telegram webhooks.
 
 ## Run locally for testing
 
@@ -72,7 +72,7 @@ $env:NUEYOUNUE_BOT_TOKEN="your-private-token"
 python bot.py
 ```
 
-Press `Ctrl+C` to stop both bots.
+For local webhook testing, also set `WEBHOOK_BASE_URL` to a public HTTPS tunnel URL. Press `Ctrl+C` to stop both bots.
 
 ## BotFather command menu
 
