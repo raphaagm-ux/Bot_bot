@@ -1,0 +1,23 @@
+services:
+  - type: worker
+    name: nue-wellness-telegram-bots
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: WELLNSSCOUCH_BOT_TOKEN
+        sync: false
+      - key: NUEYOUNUE_BOT_TOKEN
+        sync: false
+      - key: WEBSITE_URL
+        sync: false
+      - key: ORDER_URL
+        sync: false
+      - key: GUIDES_URL
+        sync: false
+      - key: SUPPORT_USERNAME
+        sync: false
+
